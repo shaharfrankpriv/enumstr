@@ -1,0 +1,63 @@
+newline        = "\n";
+
+@lifted
+eol            = (" " / "\t" / block_comment)* (";" / "\n" / !. / line_comment);
+
+@lifted @squashed
+whitespace = " " / "\t" / "\r" / "\n";
+
+@lifted @squashed
+line_comment = "//" (!"\n" .)* ("\n" / !.);
+
+@lifted @squashed
+block_comment = "/*" (!"*/" .)* "*/";
+
+@lifted
+comment = line_comment / block_comment;
+
+@lifted @spaced
+ws = whitespace / line_comment / block_comment;
+
+@lifted
+inlinews = " " / "\t" / block_comment;
+
+@lifted
+linews = " " / "\t" / comment;
+
+
+@squashed @tight
+identifier = ([a-z]/[A-Z]/"_") ([a-z]/[A-Z]/[0-9]/"_")*;
+
+@squashed @tight
+integer = [0-9]+;
+
+@lifted
+keywords = "enum" / "typedef";
+
+# Root token
+SourceFile = (enum / ignore)*;
+
+# Non enum tokens / lines to ignore
+ignore = (!enum .)*;
+
+@lifted
+enum = (enum_def / enum_type) SEMI;
+
+@nonterminal
+enum_value = (identifier EQ integer) / identifier;
+
+@nonterminal
+enum_list = enum_value (COMMA enum_value)* COMMA?;
+
+@nonterminal
+enum_def = "enum" identifier? LBRACE enum_list? RBRACE identifier?;
+
+@nonterminal
+enum_type = "typedef" "enum" identifier? LBRACE enum_list? RBRACE identifier;
+
+
+LBRACE = "{";
+RBRACE = "}";
+EQ = "=";
+COMMA = ",";
+SEMI = ";";
