@@ -207,6 +207,7 @@ typedef struct EnumParams {
     int max_enum_value;
     char* str_fn;
     char* fn_prefix;
+    bool dump_enum;
 } EnumParams;
 
 char* _def_str_function =
@@ -286,7 +287,7 @@ void EmitFunction(P4_Node* enum_node, char* identifier, FILE* file)
         fprintf(file, ";\n");
     } else {
         fprintf(file, "{ return %s(%s%s, (int)val, sizeof(%s%s) / sizeof(char*)); }\n", params->str_fn,
-                params->array_prefix, identifier, params->str_fn, params->array_prefix);
+                params->array_prefix, identifier, params->array_prefix, identifier);
     }
 }
 
@@ -354,6 +355,10 @@ P4_Error EmitEnumList(char* identifier, P4_Node* root, FILE* file, ErrStr* errst
     EnumParams* params = (EnumParams*)root->userdata;
     int value = 0;
 
+    if (params->is_header) {
+        return P4_Ok;
+    }
+    
     fprintf(file, "char *%s%s[] = {\n", params->array_prefix, identifier);
 
     for (P4_Node* node = root->head; node; node = node->next) {
@@ -370,6 +375,17 @@ P4_Error EmitEnumList(char* identifier, P4_Node* root, FILE* file, ErrStr* errst
 }
 
 /**
+ * @brief Emit the original enum. Probably for debugging.
+ */
+void EmitEnums(P4_Node *node, FILE *file)
+{
+    char *copy = P4_CopyNodeString(node);
+    fputs(copy, file);
+    fputs("\n\n", file);
+    free(copy);
+}
+
+/**
  * @brief Processes a single enum_type node.
  *
  * @param root - enum_type node
@@ -381,6 +397,7 @@ P4_Error ProcessEnumType(P4_Node* root, FILE* file, ErrStr* errstr)
 {
     // enum_type = "typedef" "enum" identifier? LBRACE enum_list? RBRACE
     // identifier SEMI;
+    EnumParams *params = root->userdata;
     P4_Node* node = root->head;
     P4_Node* list = NULL;
 
@@ -424,6 +441,9 @@ P4_Error ProcessEnumType(P4_Node* root, FILE* file, ErrStr* errstr)
         DEBUG_INFO("(skip)>");
         return P4_Ok;
     }
+    if (params->dump_enum) {
+        EmitEnums(root, file);
+    }
     P4_Error err = EmitEnumList(identifier, list, file, errstr);
     if (err == P4_Ok) {
         EmitFunction(root, identifier, file);
@@ -444,6 +464,7 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
     // enum_def = "enum" identifier? LBRACE enum_list? RBRACE identifier? SEMI;
 
     DEBUG_INFO("<");
+    EnumParams *params = root->userdata;
     P4_Node* node = root->head;
     P4_Node* list = NULL;
 
@@ -480,6 +501,9 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
     if (!list) {
         DEBUG_INFO("(skip)>");
         return P4_Ok;
+    }
+    if (params->dump_enum) {
+        EmitEnums(root, file);
     }
     P4_Error err = EmitEnumList(identifier, list, file, errstr);
     if (err == P4_Ok) {
@@ -526,7 +550,7 @@ P4_Error ProcessRootEnums(P4_Node* root, FILE* file, ErrStr* errstr)
 
 /**
  * @brief Returns a normalized copy of the header string.
- * @details Converts '/' to '_', remove '.' and copy/convert all alphanum to Upper.
+ * @details Converts '/' and '.' to '_', and copy/convert all alphanum to Upper.
  * @param header 
  * @return a new string to be free() by the caller.
  */
@@ -536,10 +560,8 @@ char* NormalizeHeaderCopy(char* header)
     char* n = new_header;
 
     for (char* c = header; *c; c++) {
-        if (*c == '/') {
+        if (*c == '/' || *c == '.') {
             *n++ = '_';
-        } else if (*c == '.') {
-            // Skip
         } else if isalnum (*c) {
             *n++ = toupper(*c);
         }
@@ -558,7 +580,7 @@ void EmitStart(EnumParams*params, char* header, FILE* file)
         header = NormalizeHeaderCopy(header);
         fprintf(file, "// Auto generated header for enum strings\n");
         fprintf(file, "#ifndef __%s\n", header);
-        fprintf(file, "#define __{%s}\n", header);
+        fprintf(file, "#define __%s\n", header);
         free(header);
     } else {
         fprintf(file, "// Start of generated enum strings section\n");
@@ -573,7 +595,7 @@ void EmitEnd(char* header, FILE* file)
 {
     if (header) {
         header = NormalizeHeaderCopy(header);
-        fprintf(file, "#endif   // {%s}\n", header);
+        fprintf(file, "#endif   // %s\n", header);
         free(header);
     } else {
         fprintf(file, "// End of generated enum strings section\n");
@@ -603,6 +625,7 @@ EnumParams _def_enum_params = {
         .max_enum_value = 1024,
         .str_fn = "_EnumStr",  // (char*)(char **arr, int val, int max)
         .fn_prefix = "EnumStr_",
+        .dump_enum = 1,
 };
 
 int main(int argc, char** argv)
@@ -630,7 +653,7 @@ int main(int argc, char** argv)
 
     P4_SetUserDataFreeFunc(grammar, NULL);  // don't free user data == params on stack
 
-    char* header = NULL;
+    char* header = "/tmp/test.h";
     params.is_header = header != NULL;
 
     EmitStart(&params, header, out);
