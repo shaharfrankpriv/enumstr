@@ -41,19 +41,17 @@ SourceFile = (enum / ignore)*;
 ignore = (!enum .)*;
 
 @lifted
-enum = (enum_def / enum_type) SEMI;
+enum = (enum_def / enum_type);
 
-@nonterminal
 enum_value = (identifier EQ integer) / identifier;
 
-@nonterminal
 enum_list = enum_value (COMMA enum_value)* COMMA?;
 
 @nonterminal
-enum_def = "enum" identifier? LBRACE enum_list? RBRACE identifier?;
+enum_def = "enum" identifier? LBRACE enum_list? RBRACE identifier? SEMI;
 
 @nonterminal
-enum_type = "typedef" "enum" identifier? LBRACE enum_list? RBRACE identifier;
+enum_type = "typedef" "enum" identifier? LBRACE enum_list? RBRACE identifier SEMI;
 
 
 LBRACE = "{";
