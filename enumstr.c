@@ -206,6 +206,7 @@ typedef struct EnumParams {
     bool is_header;
     int max_enum_value;
     char* str_fn;
+    char* fn_prefix;
 } EnumParams;
 
 char* _def_str_function =
@@ -268,6 +269,25 @@ void DebugNode(char* msg, P4_Node* node)
 {
     char buf[256];
     DEBUG_INFO("%s: %s\n", msg, FormatNode(node, buf, sizeof(buf)));
+}
+
+/**
+ * @brief Emits a lookup function for the given enum_node.
+ * @details Emits a function declaration if header, eitherwise the full function.
+ */
+void EmitFunction(P4_Node* enum_node, char* identifier, FILE* file)
+{
+    EnumParams* params = (EnumParams*)enum_node->userdata;
+
+    bool is_type = !strcmp(enum_node->rule_name, "enum_type");
+
+    fprintf(file, "char *%s%s(%s%s val)", params->fn_prefix, identifier, is_type ? "" : "enum ", identifier);
+    if (params->is_header) {
+        fprintf(file, ";\n");
+    } else {
+        fprintf(file, "{ return %s(%s%s, (int)val, sizeof(%s%s) / sizeof(char*)); }\n", params->str_fn,
+                params->array_prefix, identifier, params->str_fn, params->array_prefix);
+    }
 }
 
 /**
@@ -379,12 +399,12 @@ P4_Error ProcessEnumType(P4_Node* root, FILE* file, ErrStr* errstr)
     node = node->next;
     if (!strcmp(node->rule_name, "enum_list")) {
         list = node;
+        node = node->next;
     } else {
         char buf[256];
-        Warn("Skip empy enum list <%s>", FormatNode(root, buf, sizeof(buf)));
+        Warn("Skip empty enum list <%s>", FormatNode(root, buf, sizeof(buf)));
     }
 
-    node = node->next;
     if (strcmp(node->rule_name, "RBRACE")) {
         PANIC_NODE(node, "Enum type without '}'");
     }
@@ -400,8 +420,14 @@ P4_Error ProcessEnumType(P4_Node* root, FILE* file, ErrStr* errstr)
     if (strcmp(node->rule_name, "SEMI")) {
         PANIC_NODE(node, "Enum type without ';'");
     }
-    P4_Error err = list ? EmitEnumList(identifier, list, file, errstr) : P4_Ok;
-    DEBUG_INFO(">");
+    if (!list) {
+        DEBUG_INFO("(skip)>");
+        return P4_Ok;
+    }
+    P4_Error err = EmitEnumList(identifier, list, file, errstr);
+    if (err == P4_Ok) {
+        EmitFunction(root, identifier, file);
+    }
     return err;
 }
 
@@ -451,8 +477,14 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
         // root->slice.start.offset);
         PANIC_NODE(root, "Enum def without ';'");
     }
-    P4_Error err = list == NULL ? P4_Ok : EmitEnumList(identifier, list, file, errstr);
-    DEBUG_INFO(">");
+    if (!list) {
+        DEBUG_INFO("(skip)>");
+        return P4_Ok;
+    }
+    P4_Error err = EmitEnumList(identifier, list, file, errstr);
+    if (err == P4_Ok) {
+        EmitFunction(root, identifier, file);
+    }
     return err;
 }
 
@@ -519,18 +551,18 @@ char* NormalizeHeaderCopy(char* header)
 /**
  * @brief Emit start section text.
  */
-void EmitStart(char* header, FILE* file)
+void EmitStart(EnumParams*params, char* header, FILE* file)
 {
 
     if (header) {
         header = NormalizeHeaderCopy(header);
         fprintf(file, "// Auto generated header for enum strings\n");
         fprintf(file, "#ifndef __%s\n", header);
-        fprintf(file, "#define __{%s}", header);
+        fprintf(file, "#define __{%s}\n", header);
         free(header);
     } else {
         fprintf(file, "// Start of generated enum strings section\n");
-        fprintf(file, "char *{enum_fn}(char **arr, int val, int max);");
+        fprintf(file, "char *%s(char **arr, int val, int max);\n", params->str_fn);
     }
 }
 
@@ -570,6 +602,7 @@ EnumParams _def_enum_params = {
         .is_header = 0,
         .max_enum_value = 1024,
         .str_fn = "_EnumStr",  // (char*)(char **arr, int val, int max)
+        .fn_prefix = "EnumStr_",
 };
 
 int main(int argc, char** argv)
@@ -600,7 +633,7 @@ int main(int argc, char** argv)
     char* header = NULL;
     params.is_header = header != NULL;
 
-    EmitStart(header, out);
+    EmitStart(&params, header, out);
 
     if (!params.is_header) {
         EmitStrFunction(out);
