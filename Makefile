@@ -1,5 +1,6 @@
 
 TOOL=./enumstr.py
+CFLAGS += -Wall
 
 PEG_HEADERS=/usr/local/include/peppa.h
 PEG_LIBDIR=/usr/local/lib/
