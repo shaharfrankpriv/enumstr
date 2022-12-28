@@ -1,5 +1,4 @@
 #include <fcntl.h>
-#include <peppa.h>  // /usr/local/include
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,14 +6,17 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "peppapeg/peppa.h"
+#include "argparse/argparse.h"
+
 #define ENUMSTRFILE "./enumstr.peg"
 
-char* _progname = ""; /** global program name for debug/warn/panic */
+const char* _progname = ""; /** global program name for debug/warn/panic */
 
 /**
  * @brief Returns the basename of the unix path.
  */
-char* basename(char* path)
+const char* basename(const char* path)
 {
     char* s = strrchr(path, '/');
     return s ? s + 1 : path;
@@ -23,7 +25,7 @@ char* basename(char* path)
 /**
  * @brief Sets the global Prog Name as the basename of the given path.
  */
-void SetProgName(char* path)
+void SetProgName(const char* path)
 {
     _progname = basename(path);
 }
@@ -174,7 +176,7 @@ void* FormatErrStr(ErrStr* errstr, const char* fmt, ...)
  * @return on success a malloced buffer with the content. NULL, on failure
  * @attention the returned buffer needs to be free() by the caller.
  */
-char* ReadFile(char* path, ErrStr* errstr)
+char* ReadFile(const char* path, ErrStr* errstr)
 {
     DEBUG_INFO("path '%s'", path);
     int fd = open(path, O_RDONLY);
@@ -202,7 +204,7 @@ char* ReadFile(char* path, ErrStr* errstr)
 /*********************************************/
 
 typedef struct EnumParams {
-    char array_prefix[256];
+    char *array_prefix;
     bool is_header;
     int max_enum_value;
     char* str_fn;
@@ -358,7 +360,7 @@ P4_Error EmitEnumList(char* identifier, P4_Node* root, FILE* file, ErrStr* errst
     if (params->is_header) {
         return P4_Ok;
     }
-    
+
     fprintf(file, "char *%s%s[] = {\n", params->array_prefix, identifier);
 
     for (P4_Node* node = root->head; node; node = node->next) {
@@ -377,9 +379,9 @@ P4_Error EmitEnumList(char* identifier, P4_Node* root, FILE* file, ErrStr* errst
 /**
  * @brief Emit the original enum. Probably for debugging.
  */
-void EmitEnums(P4_Node *node, FILE *file)
+void EmitEnums(P4_Node* node, FILE* file)
 {
-    char *copy = P4_CopyNodeString(node);
+    char* copy = P4_CopyNodeString(node);
     fputs(copy, file);
     fputs("\n\n", file);
     free(copy);
@@ -397,7 +399,7 @@ P4_Error ProcessEnumType(P4_Node* root, FILE* file, ErrStr* errstr)
 {
     // enum_type = "typedef" "enum" identifier? LBRACE enum_list? RBRACE
     // identifier SEMI;
-    EnumParams *params = root->userdata;
+    EnumParams* params = root->userdata;
     P4_Node* node = root->head;
     P4_Node* list = NULL;
 
@@ -464,7 +466,7 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
     // enum_def = "enum" identifier? LBRACE enum_list? RBRACE identifier? SEMI;
 
     DEBUG_INFO("<");
-    EnumParams *params = root->userdata;
+    EnumParams* params = root->userdata;
     P4_Node* node = root->head;
     P4_Node* list = NULL;
 
@@ -573,7 +575,7 @@ char* NormalizeHeaderCopy(char* header)
 /**
  * @brief Emit start section text.
  */
-void EmitStart(EnumParams*params, char* header, FILE* file)
+void EmitStart(EnumParams* params, char* header, FILE* file)
 {
 
     if (header) {
@@ -619,30 +621,8 @@ P4_Error SetUserData(P4_Node* node, void* userdata)
     return P4_Ok;
 }
 
-EnumParams _def_enum_params = {
-        .array_prefix = "_str_",
-        .is_header = 0,
-        .max_enum_value = 1024,
-        .str_fn = "_EnumStr",  // (char*)(char **arr, int val, int max)
-        .fn_prefix = "EnumStr_",
-        .dump_enum = 1,
-};
-
-int main(int argc, char** argv)
+P4_Grammar* InitGrammar(EnumParams* params, FILE* out)
 {
-    SetProgName(argv[0]);
-    EnumParams params = _def_enum_params;
-    FILE* out = stdout;
-
-    argc--;  // ignore argv0
-    argv++;
-
-    if (argc < 1) {
-        Panic("At least one source file must be specified.");
-    }
-
-    DEBUG_INFO("Start (argc %d)", argc);
-
     ErrStr errstr;
     char* buf = ReadFile(ENUMSTRFILE, &errstr);
     if (!buf) {
@@ -653,9 +633,91 @@ int main(int argc, char** argv)
 
     P4_SetUserDataFreeFunc(grammar, NULL);  // don't free user data == params on stack
 
-    char* header = "/tmp/test.h";
-    params.is_header = header != NULL;
+    return grammar;
+}
 
+void ParseFile(const char* srcfile, P4_Grammar* grammar, EnumParams* params, FILE* out)
+{
+    ErrStr errstr;
+    P4_Error error = P4_Ok;
+
+    char* srcbuf = ReadFile(srcfile, &errstr);
+    if (!srcbuf) {
+        Panic("Can't read src file: %s", errstr.str);
+    }
+    P4_Source* source = P4_CreateSource(srcbuf, "SourceFile");
+    if ((error = P4_Parse(grammar, source)) != P4_Ok) {
+        Panic("parse: %s", P4_GetErrorMessage(source));
+    } else if ((error = P4_InspectSourceAst(P4_GetSourceAst(source), &params, SetUserData)) != P4_Ok) {
+        Panic("SerUserData failed");
+    } else if ((error = ProcessRootEnums(P4_GetSourceAst(source), out, &errstr)) != P4_Ok) {
+        Panic("eval: %d", error);
+    }
+    P4_DeleteSource(source);
+}
+
+void DoneParsing(EnumParams* params)
+{
+}
+
+EnumParams _def_enum_params = {
+        .array_prefix = "_str_",
+        .is_header = 0,
+        .max_enum_value = 1024,
+        .str_fn = "_EnumStr",  // (char*)(char **arr, int val, int max)
+        .fn_prefix = "EnumStr_",
+        .dump_enum = 1,
+};
+
+int InitArguments(EnumParams* params, int argc, const char **argv)
+{
+    struct argparse_option options[] = {
+            OPT_HELP(),
+            OPT_STRING('A', "array_prefix", &params->array_prefix, "prefix of per enum string array", NULL, 0, 0),
+            OPT_STRING('S', "strfn", &params->str_fn, "internal enum string function to use", NULL, 0, 0),
+            OPT_STRING('F', "strfn_prefix", &params->fn_prefix, "prefix of per enum string function", NULL, 0, 0),
+            OPT_BOOLEAN('H', "header", &params->is_header, "emit headers only", NULL, 0, 0),
+            OPT_BOOLEAN('E', "dump_enums", &params->dump_enum, "dump the source enums", NULL, 0, 0),
+            OPT_INTEGER('M', "max_enum", &params->max_enum_value, NULL, 0, 0),
+
+            OPT_END(),
+    };
+
+    struct argparse argparse;
+    argparse_init(&argparse, options, NULL, 0);
+    argparse_describe(&argparse, "\nA brief description of what the program does and how it works.",
+                      "\nAdditional description of the program after the description of the arguments.");
+    argc = argparse_parse(&argparse, argc, argv);
+
+    printf("A %s\n", params->array_prefix);
+    printf("S %s\n", params->str_fn);
+    printf("F %s\n", params->fn_prefix);
+
+    return argc;
+}
+
+int main(int argc, const char** argv)
+{
+    SetProgName(argv[0]);
+    EnumParams params = _def_enum_params;
+    FILE* out = stdout;
+
+    argc = InitArguments(&params, argc, argv);
+
+    if (argc < 1) {
+        Panic("At least one source file must be specified.");
+    }
+
+    DEBUG_INFO("Start (argc %d)", argc);
+    for (int i; i < argc; i++) {
+        printf("%d %s\n", i, argv[i]);
+    }
+    exit(0);
+
+    P4_Grammar* grammar = InitGrammar(&params, out);
+
+    char* header = NULL;  //"/tmp/test.h";
+    params.is_header = header != NULL;
     EmitStart(&params, header, out);
 
     if (!params.is_header) {
@@ -663,23 +725,8 @@ int main(int argc, char** argv)
     }
 
     for (int i = 0; i < argc; i++) {
-        P4_Error error = P4_Ok;
-
-        char* srcbuf = ReadFile(argv[i], &errstr);
-        if (!buf) {
-            Panic("Can't read grammer file: %s", errstr.str);
-        }
-        P4_Source* source = P4_CreateSource(srcbuf, "SourceFile");
-        if ((error = P4_Parse(grammar, source)) != P4_Ok) {
-            Panic("parse: %s", P4_GetErrorMessage(source));
-        } else if ((error = P4_InspectSourceAst(P4_GetSourceAst(source), &params, SetUserData)) != P4_Ok) {
-            Panic("SerUserData failed");
-        } else if ((error = ProcessRootEnums(P4_GetSourceAst(source), out, &errstr)) != P4_Ok) {
-            Panic("eval: %d", error);
-        }
-        P4_DeleteSource(source);
+        ParseFile(argv[i], grammar, &params, out);
     }
-
     EmitEnd(header, out);
 
     P4_DeleteGrammar(grammar);

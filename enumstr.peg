@@ -1,3 +1,4 @@
+# PeppaPeg PEG file to strip C enum declarations
 newline        = "\n";
 
 @lifted
