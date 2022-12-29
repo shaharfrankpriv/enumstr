@@ -7,7 +7,7 @@ TOOL=./enumstr.py
 CFLAGS += -Wall -Werror
 
 ENUM_GRAMMER = enumstr.peg
-DOT_SCRIPT = peppapeg/gendot.py
+DOT_SCRIPT = ${GLOBAL}/scripts/gendot.py
 
 LIBDIR=${GLOBAL}/lib
 INCDIR=${GLOBAL}/include
@@ -27,18 +27,9 @@ enumstr.o: enumstr.c ${HDRS}
 enumpeg.h: enumstr.peg
 	sed -e 's/\\/\\\\/g;s/"/\\"/g;s/	/\\t/g;s/^/"/;s/$$/\\n"/' $< > $@
 
-# Python section
-test: sample
-	./sample
-
-sample: sample.c sample.h
-	 ${CC} ${CFLAGS} $< -o $@
-
-sample.c: sample.h ${TOOL}
-	${TOOL} --sample --use_header $< > $@
-
-sample.h: ${TOOL}
-	${TOOL} --sample --dump --gen_header $@ > $@
+.PHONY: test
+test: enumstr
+	cd tests && make
 
 # Peg utilitys
 .PHONY: graph
@@ -55,4 +46,5 @@ graph: enumstr.svg
 
 # General
 clean:
-	rm -f sample.c sample.h sample enumstr.o enumstr *.o *.svg *.asl
+	rm -f sample.c sample.h sample enumstr.o enumstr *.o *.svg *.asl enumpeg.h
+	cd tests && make clean
