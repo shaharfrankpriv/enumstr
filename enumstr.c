@@ -11,6 +11,11 @@
 
 #define ENUMSTRFILE "./enumstr.peg"
 
+/* The following is the enumstr.peg file translated into a c string file */
+char* enumpeg = ""
+#include "enumpeg.h"
+        ;
+
 const char* _progname = ""; /** global program name for debug/warn/panic */
 
 /**
@@ -208,7 +213,7 @@ char* ReadFile(const char* path, ErrStr* errstr)
     fstat(fd, &sbuf);
     off_t size = sbuf.st_size;
 
-    char* buf = malloc(size);
+    char* buf = malloc(size+1);
     if (!buf) {
         return FormatErrStr(errstr, "can't open alloc buffer for '%s' size %lld", path, size);
     }
@@ -216,6 +221,7 @@ char* ReadFile(const char* path, ErrStr* errstr)
     if (NRead(fd, buf, size) != size) {
         return FormatErrStr(errstr, "can't read grammer file '%s' - %m", path);
     }
+    buf[size] = 0;
     return buf;
 }
 
@@ -225,7 +231,7 @@ char* ReadFile(const char* path, ErrStr* errstr)
 
 typedef struct EnumParams {
     char* array_prefix;
-    bool is_header;
+    char* header;
     int max_enum_value;
     char* str_fn;
     char* fn_prefix;
@@ -233,6 +239,7 @@ typedef struct EnumParams {
     bool reuse;  // reuse str function
     bool skip_includes;
     char* use_header;  // to be added to includes
+    char* grammar;     // override over the internal one
 } EnumParams;
 
 char* _def_str_function =
@@ -301,17 +308,17 @@ void DebugNode(char* msg, P4_Node* node)
  * @brief Emits a lookup function for the given enum_node.
  * @details Emits a function declaration if header, eitherwise the full function.
  */
-void EmitFunction(P4_Node* enum_node, char* identifier, FILE* file)
+void EmitFunction(P4_Node* enum_node, char* identifier, FILE* out)
 {
     EnumParams* params = (EnumParams*)enum_node->userdata;
 
     bool is_type = !strcmp(enum_node->rule_name, "enum_type");
 
-    fprintf(file, "char *%s%s(%s%s val)", params->fn_prefix, identifier, is_type ? "" : "enum ", identifier);
-    if (params->is_header) {
-        fprintf(file, ";\n");
+    fprintf(out, "char *%s%s(%s%s val)", params->fn_prefix, identifier, is_type ? "" : "enum ", identifier);
+    if (params->header) {
+        fprintf(out, ";\n");
     } else {
-        fprintf(file, "{ return %s(%s%s, (int)val, sizeof(%s%s) / sizeof(char*)); }\n", params->str_fn,
+        fprintf(out, "{ return %s(%s%s, (int)val, sizeof(%s%s) / sizeof(char*)); }\n", params->str_fn,
                 params->array_prefix, identifier, params->array_prefix, identifier);
     }
 }
@@ -337,7 +344,7 @@ P4_Error EmitEnumItem(P4_Node* root, FILE* file, int* value)
     EnumParams* params = (EnumParams*)root->userdata;
     P4_Node* node = root->head;
 
-    if (params->is_header) {
+    if (params->header) {
         return P4_Ok;
     }
 
@@ -378,9 +385,9 @@ P4_Error EmitEnumList(char* identifier, P4_Node* root, FILE* file, ErrStr* errst
 
     DEBUG_INFO("< root %p", root);
     EnumParams* params = (EnumParams*)root->userdata;
-    int value = 0;
+    int value = -1;     // such that first enum without a value will be 0
 
-    if (params->is_header) {
+    if (params->header) {
         return P4_Ok;
     }
 
@@ -598,18 +605,21 @@ char* NormalizeHeaderCopy(char* header)
 /**
  * @brief Emit start section text.
  */
-void EmitStart(EnumParams* params, char* header, FILE* file)
+void EmitStart(EnumParams* params, FILE* out)
 {
 
-    if (header) {
-        header = NormalizeHeaderCopy(header);
-        fprintf(file, "// Auto generated header for enum strings\n");
-        fprintf(file, "#ifndef __%s\n", header);
-        fprintf(file, "#define __%s\n", header);
+    if (params->header) {
+        char* header = NormalizeHeaderCopy(params->header);
+        fprintf(out, "// Auto generated header for enum strings\n");
+        fprintf(out, "#ifndef __%s\n", header);
+        fprintf(out, "#define __%s\n", header);
+        fprintf(out, "char *%s(char **arr, int val, int max);\n", params->str_fn);
         free(header);
     } else {
-        fprintf(file, "// Start of generated enum strings section\n");
-        fprintf(file, "char *%s(char **arr, int val, int max);\n", params->str_fn);
+        fprintf(out, "// Start of generated enum strings section\n");
+        if (params->use_header) {
+            fprintf(out, "#include \"%s\"\n", params->use_header);
+        }
     }
 }
 
@@ -647,9 +657,13 @@ P4_Error SetUserData(P4_Node* node, void* userdata)
 P4_Grammar* InitGrammar(EnumParams* params, FILE* out)
 {
     ErrStr errstr;
-    char* buf = ReadFile(ENUMSTRFILE, &errstr);
-    if (!buf) {
-        Panic("Can't read grammer file: %s", errstr.str);
+    char* buf = enumpeg;
+
+    if (params->grammar) {
+        buf = ReadFile(params->grammar, &errstr);
+        if (!buf) {
+            Panic("Can't read grammer file: %s", errstr.str);
+        }
     }
 
     P4_Grammar* grammar = P4_LoadGrammar(buf);
@@ -670,8 +684,8 @@ void ParseFile(const char* srcfile, P4_Grammar* grammar, EnumParams* params, FIL
     }
     P4_Source* source = P4_CreateSource(srcbuf, "SourceFile");
     if ((error = P4_Parse(grammar, source)) != P4_Ok) {
-        Panic("parse: %s", P4_GetErrorMessage(source));
-    } else if ((error = P4_InspectSourceAst(P4_GetSourceAst(source), &params, SetUserData)) != P4_Ok) {
+        Panic("parse: %s <\n%s>", P4_GetErrorMessage(source), srcbuf);
+    } else if ((error = P4_InspectSourceAst(P4_GetSourceAst(source), params, SetUserData)) != P4_Ok) {
         Panic("SerUserData failed");
     } else if ((error = ProcessRootEnums(P4_GetSourceAst(source), out, &errstr)) != P4_Ok) {
         Panic("eval: %d", error);
@@ -679,11 +693,8 @@ void ParseFile(const char* srcfile, P4_Grammar* grammar, EnumParams* params, FIL
     P4_DeleteSource(source);
 }
 
-void EmitIncludes(const char** sources, int nsources, char* header, FILE* out)
+void EmitIncludes(const char** sources, int nsources, FILE* out)
 {
-    if (header) {
-        fprintf(out, "#include \"%s\"\n", header);
-    }
     for (int i = 0; i < nsources; i++) {
         fprintf(out, "#include \"%s\"\n", sources[i]);
     }
@@ -691,7 +702,7 @@ void EmitIncludes(const char** sources, int nsources, char* header, FILE* out)
 
 EnumParams _def_enum_params = {
         .array_prefix = "_str_",
-        .is_header = 0,
+        .header = NULL,
         .max_enum_value = 1024,
         .str_fn = "_EnumStr",  // (char*)(char **arr, int val, int max)
         .fn_prefix = "EnumStr_",
@@ -699,6 +710,7 @@ EnumParams _def_enum_params = {
         .reuse = 0,
         .skip_includes = 0,
         .use_header = NULL,
+        .grammar = NULL,
 };
 
 int InitArguments(EnumParams* params, int argc, const char** argv)
@@ -706,18 +718,22 @@ int InitArguments(EnumParams* params, int argc, const char** argv)
     char debug_buf[64], *debug_str = debug_buf;
     strcpy(debug_str, dbg_level_str(DBG_CRIT));
 
+    int use_debug = 0;
+
     struct argparse_option options[] = {
             OPT_HELP(),
+            OPT_STRING('G', "grammar", &params->grammar, "override the internal peg grammer file", NULL, 0, 0),
             OPT_STRING('A', "array_prefix", &params->array_prefix, "prefix of per enum string array", NULL, 0, 0),
             OPT_STRING('S', "strfn", &params->str_fn, "internal enum string function to use", NULL, 0, 0),
             OPT_STRING('F', "strfn_prefix", &params->fn_prefix, "prefix of per enum string function", NULL, 0, 0),
             OPT_STRING('U', "use_header", &params->use_header, "include the given header file", NULL, 0, 0),
-            OPT_BOOLEAN('H', "header", &params->is_header, "emit headers only", NULL, 0, 0),
+            OPT_STRING('H', "header", &params->header, "emit header for given name", NULL, 0, 0),
             OPT_BOOLEAN('E', "dump_enums", &params->dump_enum, "dump the source enums", NULL, 0, 0),
             OPT_BOOLEAN('R', "reuse", &params->reuse, "reuse an existing str function, don't emit one", NULL, 0, 0),
-            OPT_BOOLEAN('K', "skip_includes", &params->reuse, "do not emit include statements", NULL, 0, 0),
+            OPT_BOOLEAN('K', "skip_includes", &params->skip_includes, "do not emit include source files", NULL, 0, 0),
             OPT_INTEGER('M', "max_enum", &params->max_enum_value, "ignore enum values above this max", NULL, 0, 0),
-            OPT_STRING('d', "debug", &debug_str, debug_levels, NULL, 0, 0),
+            OPT_STRING('D', "debug_level", &debug_str, debug_levels, NULL, 0, 0),
+            OPT_BOOLEAN('d', "debug", &use_debug, "show debug messages", NULL, 0, 0),
 
             OPT_END(),
     };
@@ -730,6 +746,9 @@ int InitArguments(EnumParams* params, int argc, const char** argv)
                       "\t./enumstr --use_header enums.h source.c > enums.c\n");
     argc = argparse_parse(&argparse, argc, argv);
 
+    if (use_debug && _debug_level < DBG_INFO) {
+        _debug_level = DBG_INFO;
+    }
     _debug_level = dbg_level(debug_str);
 
     DEBUG_INFO("debug level: \"%s\" (%d)\n", dbg_level_str(_debug_level), _debug_level);
@@ -755,22 +774,20 @@ int main(int argc, const char** argv)
 
     P4_Grammar* grammar = InitGrammar(&params, out);
 
-    char* header = NULL;  //"/tmp/test.h";
-    params.is_header = header != NULL;
-    EmitStart(&params, header, out);
+    EmitStart(&params, out);
 
-    if (!params.skip_includes) {
-        EmitIncludes(argv, argc, params.use_header, out);
+    if (!params.skip_includes && !params.header) {
+        EmitIncludes(argv, argc, out);
     }
 
-    if (!params.reuse && !params.is_header) {
+    if (!params.reuse && !params.header) {
         EmitStrFunction(out);
     }
 
     for (int i = 0; i < argc; i++) {
         ParseFile(argv[i], grammar, &params, out);
     }
-    EmitEnd(header, out);
+    EmitEnd(params.header, out);
 
     P4_DeleteGrammar(grammar);
     DEBUG_INFO("Done.");

@@ -15,7 +15,7 @@ PEG_LIB=peppa
 ARGS_LIB=argparse
 
 EXTRA_HEADERS=${INCDIR}/peppa.h ${INCDIR}/argparse.h
-HDRS=${EXTRA_HEADERS}
+HDRS=${EXTRA_HEADERS} enumpeg.h
 
 enumstr: enumstr.o
 	${CC} ${LDFLAGS} -L ${LIBDIR} -Wl,-R${LIBDIR} $< -o $@ -l ${PEG_LIB} -l ${ARGS_LIB}
@@ -24,6 +24,8 @@ enumstr: enumstr.o
 enumstr.o: enumstr.c ${HDRS}
 	${CC} ${CFLAGS} -I ${INCDIR} -c $< -o $@
 
+enumpeg.h: enumstr.peg
+	sed -e 's/\\/\\\\/g;s/"/\\"/g;s/	/\\t/g;s/^/"/;s/$$/\\n"/' $< > $@
 
 # Python section
 test: sample
