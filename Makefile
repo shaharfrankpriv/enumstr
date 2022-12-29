@@ -1,27 +1,28 @@
 
 TARGET=enumstr
+GLOBAL=${HOME}/work
 
 PWD:=${shell pwd -P}
 TOOL=./enumstr.py
-CFLAGS += -Wall
+CFLAGS += -Wall -Werror
 
 ENUM_GRAMMER = enumstr.peg
 DOT_SCRIPT = peppapeg/gendot.py
 
-PEG_HDRDIR=./peppapeg
-PEG_HEADER=peppa.h
-PEG_LIBDIR=${PWD}/peppapeg
+LIBDIR=${GLOBAL}/lib
+INCDIR=${GLOBAL}/include
 PEG_LIB=peppa
-ARGS_LIBDIR=${PWD}/argparse
 ARGS_LIB=argparse
 
-HDRS=peppapeg/peppa.h argparse/argparse.h
+EXTRA_HEADERS=${INCDIR}/peppa.h ${INCDIR}/argparse.h
+HDRS=${EXTRA_HEADERS}
 
 enumstr: enumstr.o
-	${CC} ${LDFLAGS} -L ${PEG_LIBDIR} -L ${ARGS_LIBDIR} -Wl,-R${PEG_LIBDIR} -Wl,-R${ARGS_LIBDIR} $< -o $@ -l ${PEG_LIB} -l ${ARGS_LIB}
+	${CC} ${LDFLAGS} -L ${LIBDIR} -Wl,-R${LIBDIR} $< -o $@ -l ${PEG_LIB} -l ${ARGS_LIB}
+
 
 enumstr.o: enumstr.c ${HDRS}
-	${CC} ${CFLAGS} -I ${PEG_HDRDIR} -c $< -o $@
+	${CC} ${CFLAGS} -I ${INCDIR} -c $< -o $@
 
 
 # Python section

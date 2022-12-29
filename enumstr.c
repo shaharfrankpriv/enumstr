@@ -6,8 +6,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "peppapeg/peppa.h"
-#include "argparse/argparse.h"
+#include <argparse.h>
+#include <peppa.h>
 
 #define ENUMSTRFILE "./enumstr.peg"
 
@@ -78,7 +78,27 @@ char* _str_dbg_levels[] = {
         [DBG_MAX] "MAX",
 };
 
-char* dbg_str(enum _dbg_levels level)
+const char* debug_levels = "CRIT (1), MIN (2), INFO (3), VERB (4), MAX (5)";
+
+int dbg_level(const char* name)
+{
+    for (int i = 0; i < DBG_LEVELS; i++) {
+        if (!strcmp(name, _str_dbg_levels[i]) || (strlen(name) == 1 && name[0] == '0' + i)) {
+            return i;
+        }
+    }
+    return 0;  // NONE
+}
+
+char* dbg_name(int level)
+{
+    if (level < 0 || level >= DBG_LEVELS) {
+        level = 0;
+    }
+    return _str_dbg_levels[0];
+}
+
+char* dbg_level_str(enum _dbg_levels level)
 {
     if (level < 0 || level >= DBG_LEVELS) {
         return "<ERROR>";
@@ -86,7 +106,7 @@ char* dbg_str(enum _dbg_levels level)
     return _str_dbg_levels[level];
 }
 
-int _debug_level = DBG_INFO;
+int _debug_level = DBG_CRIT;
 
 /**
  * @brief Prints the printf style message to the stderr.
@@ -101,7 +121,7 @@ void Debug(int level, const char* fmt, ...)
     va_start(args, fmt);
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
-    fprintf(stderr, "[%s] %s\n", dbg_str(level), buffer);
+    fprintf(stderr, "[%s] %s\n", dbg_level_str(level), buffer);
 }
 
 #define _DEBUG_LEVEL(level, fmt, ...) Debug(level, "[%s:%d %s] " fmt, __FILE__, __LINE__, __func__, ##__VA_ARGS__)
@@ -204,12 +224,15 @@ char* ReadFile(const char* path, ErrStr* errstr)
 /*********************************************/
 
 typedef struct EnumParams {
-    char *array_prefix;
+    char* array_prefix;
     bool is_header;
     int max_enum_value;
     char* str_fn;
     char* fn_prefix;
     bool dump_enum;
+    bool reuse;  // reuse str function
+    bool skip_includes;
+    char* use_header;  // to be added to includes
 } EnumParams;
 
 char* _def_str_function =
@@ -656,8 +679,14 @@ void ParseFile(const char* srcfile, P4_Grammar* grammar, EnumParams* params, FIL
     P4_DeleteSource(source);
 }
 
-void DoneParsing(EnumParams* params)
+void EmitIncludes(const char** sources, int nsources, char* header, FILE* out)
 {
+    if (header) {
+        fprintf(out, "#include \"%s\"\n", header);
+    }
+    for (int i = 0; i < nsources; i++) {
+        fprintf(out, "#include \"%s\"\n", sources[i]);
+    }
 }
 
 EnumParams _def_enum_params = {
@@ -666,32 +695,50 @@ EnumParams _def_enum_params = {
         .max_enum_value = 1024,
         .str_fn = "_EnumStr",  // (char*)(char **arr, int val, int max)
         .fn_prefix = "EnumStr_",
-        .dump_enum = 1,
+        .dump_enum = 0,
+        .reuse = 0,
+        .skip_includes = 0,
+        .use_header = NULL,
 };
 
-int InitArguments(EnumParams* params, int argc, const char **argv)
+int InitArguments(EnumParams* params, int argc, const char** argv)
 {
+    char debug_buf[64], *debug_str = debug_buf;
+    strcpy(debug_str, dbg_level_str(DBG_CRIT));
+
     struct argparse_option options[] = {
             OPT_HELP(),
             OPT_STRING('A', "array_prefix", &params->array_prefix, "prefix of per enum string array", NULL, 0, 0),
             OPT_STRING('S', "strfn", &params->str_fn, "internal enum string function to use", NULL, 0, 0),
             OPT_STRING('F', "strfn_prefix", &params->fn_prefix, "prefix of per enum string function", NULL, 0, 0),
+            OPT_STRING('U', "use_header", &params->use_header, "include the given header file", NULL, 0, 0),
             OPT_BOOLEAN('H', "header", &params->is_header, "emit headers only", NULL, 0, 0),
             OPT_BOOLEAN('E', "dump_enums", &params->dump_enum, "dump the source enums", NULL, 0, 0),
-            OPT_INTEGER('M', "max_enum", &params->max_enum_value, NULL, 0, 0),
+            OPT_BOOLEAN('R', "reuse", &params->reuse, "reuse an existing str function, don't emit one", NULL, 0, 0),
+            OPT_BOOLEAN('K', "skip_includes", &params->reuse, "do not emit include statements", NULL, 0, 0),
+            OPT_INTEGER('M', "max_enum", &params->max_enum_value, "ignore enum values above this max", NULL, 0, 0),
+            OPT_STRING('d', "debug", &debug_str, debug_levels, NULL, 0, 0),
 
             OPT_END(),
     };
 
     struct argparse argparse;
     argparse_init(&argparse, options, NULL, 0);
-    argparse_describe(&argparse, "\nA brief description of what the program does and how it works.",
-                      "\nAdditional description of the program after the description of the arguments.");
+    argparse_describe(&argparse, "\nParse c/cpp files and generate a string array per enum.",
+                      "\nExamples:\n"
+                      "\t./enumstr --header source.c > enums.h\n"
+                      "\t./enumstr --use_header enums.h source.c > enums.c\n");
     argc = argparse_parse(&argparse, argc, argv);
 
-    printf("A %s\n", params->array_prefix);
-    printf("S %s\n", params->str_fn);
-    printf("F %s\n", params->fn_prefix);
+    _debug_level = dbg_level(debug_str);
+
+    DEBUG_INFO("debug level: \"%s\" (%d)\n", dbg_level_str(_debug_level), _debug_level);
+
+    if (argc < 1) {
+        Warn("At least one source file is expected.\n");
+        argparse_usage(&argparse);
+        exit(1);
+    }
 
     return argc;
 }
@@ -704,15 +751,7 @@ int main(int argc, const char** argv)
 
     argc = InitArguments(&params, argc, argv);
 
-    if (argc < 1) {
-        Panic("At least one source file must be specified.");
-    }
-
     DEBUG_INFO("Start (argc %d)", argc);
-    for (int i; i < argc; i++) {
-        printf("%d %s\n", i, argv[i]);
-    }
-    exit(0);
 
     P4_Grammar* grammar = InitGrammar(&params, out);
 
@@ -720,7 +759,11 @@ int main(int argc, const char** argv)
     params.is_header = header != NULL;
     EmitStart(&params, header, out);
 
-    if (!params.is_header) {
+    if (!params.skip_includes) {
+        EmitIncludes(argv, argc, params.use_header, out);
+    }
+
+    if (!params.reuse && !params.is_header) {
         EmitStrFunction(out);
     }
 
