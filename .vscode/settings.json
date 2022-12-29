@@ -1,0 +1,9 @@
+{
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "/home/shahar/work/enumstr",
+            "binaryPath": "/home/shahar/work/enumstr/enumstr",
+            "binaryArgs": []
+        }
+    ],
+}
