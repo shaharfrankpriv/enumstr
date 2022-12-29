@@ -95,7 +95,7 @@ int main(int argc, char **argv)
     printf("b3 (out of range -1) %d - %s\\n", b3, {fn_prefix}Blah(b3));
     printf("b4 (missing 17) %d - %s\\n", b4, {fn_prefix}Blah(b4));
     printf("# Kiki - type enum, enum name Kuku\\n");
-    printf("k1 single %d - %s\\n", single, {fn_prefix}Kiki(single));
+    printf("k1 single %d - %s\\n", k1, {fn_prefix}Kiki(k1));
     return 0;
 }}
 """)
