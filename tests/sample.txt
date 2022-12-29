@@ -1,0 +1,25 @@
+    stuff before
+    enum Hello {
+        Zero,
+        One, /* a c sytle comment */
+        Two,
+        Three, // cpp style comment 
+        Five=/* embedded */ 5,
+        Six,
+        Ten=10,
+        Large=10000,    // expected to be skipped    
+        };
+    in the middle
+    typedef enum 
+        {
+        alpha = 4,
+        beta,
+        gamma1 
+        = 10 ,
+        zeta = 50
+        } Blah;
+    typedef enum Kuku
+        {
+        single
+        } Kiki;
+    at the end
