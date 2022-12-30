@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <libbasic.h>
 #include <argparse.h>
 #include <peppa.h>
 
@@ -15,215 +16,6 @@
 char* enumpeg = ""
 #include "enumpeg.h"
         ;
-
-const char* _progname = ""; /** global program name for debug/warn/panic */
-
-/**
- * @brief Returns the basename of the unix path.
- */
-const char* basename(const char* path)
-{
-    char* s = strrchr(path, '/');
-    return s ? s + 1 : path;
-}
-
-/**
- * @brief Sets the global Prog Name as the basename of the given path.
- */
-void SetProgName(const char* path)
-{
-    _progname = basename(path);
-}
-
-/**
- * @brief Prints the printf style message to the stderr and exit the program
- * with error.
- */
-void Panic(const char* fmt, ...)
-{
-    char buffer[4096];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    fprintf(stderr, "[%s] Panic: %s\n", _progname, buffer);
-    exit(1);
-}
-
-/**
- * @brief Prints the printf style message to the stderr.
- */
-void Warn(const char* fmt, ...)
-{
-    char buffer[4096];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    fprintf(stderr, "[%s] Warning: %s\n", _progname, buffer);
-}
-
-enum _dbg_levels {
-    DBG_NONE,
-    DBG_CRIT,
-    DBG_MIN,
-    DBG_INFO,
-    DBG_VERB,
-    DBG_MAX,
-
-    DBG_LEVELS
-};
-
-char* _str_dbg_levels[] = {
-        [DBG_NONE] "NONE" /* not to be used*/,
-        [DBG_CRIT] "CRIT",
-        [DBG_MIN] "MIN",
-        [DBG_INFO] "INFO",
-        [DBG_VERB] "VERB",
-        [DBG_MAX] "MAX",
-};
-
-const char* debug_levels = "CRIT (1), MIN (2), INFO (3), VERB (4), MAX (5)";
-
-int dbg_level(const char* name)
-{
-    for (int i = 0; i < DBG_LEVELS; i++) {
-        if (!strcmp(name, _str_dbg_levels[i]) || (strlen(name) == 1 && name[0] == '0' + i)) {
-            return i;
-        }
-    }
-    return 0;  // NONE
-}
-
-char* dbg_name(int level)
-{
-    if (level < 0 || level >= DBG_LEVELS) {
-        level = 0;
-    }
-    return _str_dbg_levels[0];
-}
-
-char* dbg_level_str(enum _dbg_levels level)
-{
-    if (level < 0 || level >= DBG_LEVELS) {
-        return "<ERROR>";
-    }
-    return _str_dbg_levels[level];
-}
-
-int _debug_level = DBG_CRIT;
-
-/**
- * @brief Prints the printf style message to the stderr.
- */
-void Debug(int level, const char* fmt, ...)
-{
-    if (level > _debug_level)
-        return;
-
-    char buffer[4096];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    fprintf(stderr, "[%s] %s\n", dbg_level_str(level), buffer);
-}
-
-#define _DEBUG_LEVEL(level, fmt, ...) Debug(level, "[%s:%d %s] " fmt, __FILE__, __LINE__, __func__, ##__VA_ARGS__)
-#define DEBUG_CRIT(fmt, ...) _DEBUG_LEVEL(DBG_CRIT, fmt, ##__VA_ARGS__)
-#define DEBUG_MIN(fmt, ...) _DEBUG_LEVEL(DBG_MIN, fmt, ##__VA_ARGS__)
-#define DEBUG_INFO(fmt, ...) _DEBUG_LEVEL(DBG_INFO, fmt, ##__VA_ARGS__)
-#define DEBUG_VERB(fmt, ...) _DEBUG_LEVEL(DBG_VERB, fmt, ##__VA_ARGS__)
-#define DEBUG_MAX(fmt, ...) _DEBUG_LEVEL(DBG_MAX, fmt, ##__VA_ARGS__)
-
-#define ASSERT(cond, fmt, ...)         \
-    do {                               \
-        if (!(cond)) {                 \
-            Panic(fmt, ##__VA_ARGS__); \
-        }                              \
-    } while (0)
-
-#define ASSERT_STR(s, expected) ASSERT((!strcmp((s), (expected))), "%s != %s", (s), (expected))
-#define ASSERT_INT(v, expected, fmt, ...) \
-    ASSERT((v) == (expected), "%lld != %lld", (long long)(v), (long long)(expected))
-#define ASSERT_NE_INT(v, expected, fmt, ...) \
-    ASSERT((v) != (expected), "%lld != %lld", (long long)(v), (long long)(expected))
-
-/**
- * @brief Read nbytes from the an opened file to the given buf.
- *
- * @param fd - opended file
- * @param buf - buffer large enough for nbytes
- * @param nbytes
- * @return ssize_t - nbytes on success, 0 if EOF is encounted, and -1 on errors.
- *
- * @attention buf content may be modified even if NRead didn't complete.
- */
-ssize_t NRead(int fd, void* buf, size_t nbytes)
-{
-    ssize_t left = nbytes;
-    while (left > 0) {
-        int n = read(fd, buf, nbytes);
-        if (n <= 0) {
-            return n;  // 0 == EOF, -1 == error
-        }
-        left -= n;
-        buf = (void*)((char*)buf + n);
-    }
-    return nbytes;
-}
-
-#define ERRSTRSZ 256
-/**
- * @brief A standard error string object.
- */
-typedef struct ErrStr {
-    char str[ERRSTRSZ];
-} ErrStr;
-
-/**
- * @brief Formats a message and sets errstr.
- */
-void* FormatErrStr(ErrStr* errstr, const char* fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(errstr->str, sizeof(errstr->str), fmt, args);
-    va_end(args);
-    return NULL;
-}
-
-/**
- * @brief Reads a file and returns its content.
- *
- * @param path - the unix path to the file
- * @param errstr - ErrStr structure. Modified only on failures
- * @return on success a malloced buffer with the content. NULL, on failure
- * @attention the returned buffer needs to be free() by the caller.
- */
-char* ReadFile(const char* path, ErrStr* errstr)
-{
-    DEBUG_INFO("path '%s'", path);
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) {
-        return FormatErrStr(errstr, "can't open '%s' - %m", path);
-    }
-
-    struct stat sbuf;
-    fstat(fd, &sbuf);
-    off_t size = sbuf.st_size;
-
-    char* buf = malloc(size+1);
-    if (!buf) {
-        return FormatErrStr(errstr, "can't open alloc buffer for '%s' size %lld", path, size);
-    }
-
-    if (NRead(fd, buf, size) != size) {
-        return FormatErrStr(errstr, "can't read grammer file '%s' - %m", path);
-    }
-    buf[size] = 0;
-    return buf;
-}
 
 /*********************************************/
 /* EnumStr specifics                         */
@@ -291,7 +83,7 @@ char* FormatNode(P4_Node* node, char* buf, int nb)
 #define PANIC_NODE(node, fmt, ...)                                                                             \
     do {                                                                                                       \
         char __buf[512];                                                                                       \
-        Panic("[%s:%d %s] " fmt " <%s>", __FILE__, __LINE__, __func__, FormatNode(node, __buf, sizeof(__buf)), \
+        lbPanic("[%s:%d %s] " fmt " <%s>", __FILE__, __LINE__, __func__, FormatNode(node, __buf, sizeof(__buf)), \
               ##__VA_ARGS__);                                                                                  \
     } while (0)
 
@@ -301,7 +93,7 @@ char* FormatNode(P4_Node* node, char* buf, int nb)
 void DebugNode(char* msg, P4_Node* node)
 {
     char buf[256];
-    DEBUG_INFO("%s: %s\n", msg, FormatNode(node, buf, sizeof(buf)));
+    lb_DEBUG_INFO("%s: %s\n", msg, FormatNode(node, buf, sizeof(buf)));
 }
 
 /**
@@ -339,8 +131,8 @@ P4_Error EmitEnumItem(P4_Node* root, FILE* file, int* value)
     // enum_value = (identifier EQ integer) / identifier;
     char buf[256];
 
-    DEBUG_INFO("<");
-    ASSERT_STR(root->rule_name, "enum_value");
+    lb_DEBUG_INFO("<");
+    lb_ASSERT_STR(root->rule_name, "enum_value");
     EnumParams* params = (EnumParams*)root->userdata;
     P4_Node* node = root->head;
 
@@ -366,7 +158,7 @@ P4_Error EmitEnumItem(P4_Node* root, FILE* file, int* value)
     if (*value >= 0 && *value < params->max_enum_value) {
         fprintf(file, "\t[%d] \"%s (%d)\",\n", *value, name, *value);
     }
-    DEBUG_INFO(">");
+    lb_DEBUG_INFO(">");
     return P4_Ok;
 }
 
@@ -383,7 +175,7 @@ P4_Error EmitEnumList(char* identifier, P4_Node* root, FILE* file, ErrStr* errst
 {
     // enum_list = enum_value (COMMA enum_value)* COMMA?;
 
-    DEBUG_INFO("< root %p", root);
+    lb_DEBUG_INFO("< root %p", root);
     EnumParams* params = (EnumParams*)root->userdata;
     int value = -1;     // such that first enum without a value will be 0
 
@@ -402,7 +194,7 @@ P4_Error EmitEnumList(char* identifier, P4_Node* root, FILE* file, ErrStr* errst
 
     fprintf(file, "}; \t// %s%s\n\n", params->array_prefix, identifier);
 
-    DEBUG_INFO(">");
+    lb_DEBUG_INFO(">");
     return P4_Ok;
 }
 
@@ -433,8 +225,8 @@ P4_Error ProcessEnumType(P4_Node* root, FILE* file, ErrStr* errstr)
     P4_Node* node = root->head;
     P4_Node* list = NULL;
 
-    DEBUG_INFO("<");
-    ASSERT_STR(root->rule_name, "enum_type");
+    lb_DEBUG_INFO("<");
+    lb_ASSERT_STR(root->rule_name, "enum_type");
 
     if (!strcmp(node->rule_name, "identifier")) {
         // Skip Enum Identifier, as we need to use the type identifier
@@ -451,7 +243,7 @@ P4_Error ProcessEnumType(P4_Node* root, FILE* file, ErrStr* errstr)
         node = node->next;
     } else {
         char buf[256];
-        Warn("Skip empty enum list <%s>", FormatNode(root, buf, sizeof(buf)));
+        lbWarn("Skip empty enum list <%s>", FormatNode(root, buf, sizeof(buf)));
     }
 
     if (strcmp(node->rule_name, "RBRACE")) {
@@ -470,7 +262,7 @@ P4_Error ProcessEnumType(P4_Node* root, FILE* file, ErrStr* errstr)
         PANIC_NODE(node, "Enum type without ';'");
     }
     if (!list) {
-        DEBUG_INFO("(skip)>");
+        lb_DEBUG_INFO("(skip)>");
         return P4_Ok;
     }
     if (params->dump_enum) {
@@ -495,15 +287,15 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
 {
     // enum_def = "enum" identifier? LBRACE enum_list? RBRACE identifier? SEMI;
 
-    DEBUG_INFO("<");
+    lb_DEBUG_INFO("<");
     EnumParams* params = root->userdata;
     P4_Node* node = root->head;
     P4_Node* list = NULL;
 
     if (strcmp(node->rule_name, "identifier")) {
         char buf[256];
-        Warn("Skip enum def without name <%s>]", FormatNode(node, buf, sizeof(buf)));
-        DEBUG_INFO("(skip)>");
+        lbWarn("Skip enum def without name <%s>]", FormatNode(node, buf, sizeof(buf)));
+        lb_DEBUG_INFO("(skip)>");
         return P4_Ok;
     }
     char buf[256];
@@ -511,7 +303,7 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
 
     node = node->next;
     if (strcmp(node->rule_name, "LBRACE")) {
-        Panic("Enum def without '{' pos[%d-%d]", root->slice.start, root->slice.stop);
+        lbPanic("Enum def without '{' pos[%d-%d]", root->slice.start, root->slice.stop);
     }
 
     node = node->next;
@@ -521,7 +313,7 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
 
     node = node->next;
     if (strcmp(node->rule_name, "RBRACE")) {
-        Panic("Enum def without '}' pos[%d-%d]", root->slice.start, root->slice.stop);
+        lbPanic("Enum def without '}' pos[%d-%d]", root->slice.start, root->slice.stop);
     }
 
     node = node->next;
@@ -531,7 +323,7 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
         PANIC_NODE(root, "Enum def without ';'");
     }
     if (!list) {
-        DEBUG_INFO("(skip)>");
+        lb_DEBUG_INFO("(skip)>");
         return P4_Ok;
     }
     if (params->dump_enum) {
@@ -556,27 +348,27 @@ P4_Error ProcessRootEnums(P4_Node* root, FILE* file, ErrStr* errstr)
 {
     // enum_value = (identifier EQ integer) / identifier;
 
-    DEBUG_INFO("<");
+    lb_DEBUG_INFO("<");
     P4_Error error = P4_Ok;
 
     for (P4_Node* node = root->head; node; node = node->next) {
         char buf[256];
-        DEBUG_INFO("Root child: rule '%s' text '%s'", node->rule_name, CopyNodeText(node, buf, sizeof(buf)));
+        lb_DEBUG_INFO("Root child: rule '%s' text '%s'", node->rule_name, CopyNodeText(node, buf, sizeof(buf)));
         if (!strcmp(node->rule_name, "enum_def")) {
             if ((error = ProcessEnumDef(node, file, errstr))) {
-                DEBUG_INFO("(error)>");
+                lb_DEBUG_INFO("(error)>");
                 return error;
             }
         } else if (!strcmp(node->rule_name, "enum_type")) {
             if ((error = ProcessEnumType(node, file, errstr))) {
-                DEBUG_INFO("(error)>");
+                lb_DEBUG_INFO("(error)>");
                 return error;
             }
         } else {
             // Ignore
         }
     }
-    DEBUG_INFO(">");
+    lb_DEBUG_INFO(">");
     return 0;
 }
 
@@ -660,9 +452,9 @@ P4_Grammar* InitGrammar(EnumParams* params, FILE* out)
     char* buf = enumpeg;
 
     if (params->grammar) {
-        buf = ReadFile(params->grammar, &errstr);
+        buf = lbReadFile(params->grammar, &errstr);
         if (!buf) {
-            Panic("Can't read grammer file: %s", errstr.str);
+            lbPanic("Can't read grammer file: %s", errstr.str);
         }
     }
 
@@ -678,17 +470,17 @@ void ParseFile(const char* srcfile, P4_Grammar* grammar, EnumParams* params, FIL
     ErrStr errstr;
     P4_Error error = P4_Ok;
 
-    char* srcbuf = ReadFile(srcfile, &errstr);
+    char* srcbuf = lbReadFile(srcfile, &errstr);
     if (!srcbuf) {
-        Panic("Can't read src file: %s", errstr.str);
+        lbPanic("Can't read src file: %s", errstr.str);
     }
     P4_Source* source = P4_CreateSource(srcbuf, "SourceFile");
     if ((error = P4_Parse(grammar, source)) != P4_Ok) {
-        Panic("parse: %s <\n%s>", P4_GetErrorMessage(source), srcbuf);
+        lbPanic("parse: %s <\n%s>", P4_GetErrorMessage(source), srcbuf);
     } else if ((error = P4_InspectSourceAst(P4_GetSourceAst(source), params, SetUserData)) != P4_Ok) {
-        Panic("SerUserData failed");
+        lbPanic("SerUserData failed");
     } else if ((error = ProcessRootEnums(P4_GetSourceAst(source), out, &errstr)) != P4_Ok) {
-        Panic("eval: %d", error);
+        lbPanic("eval: %d", error);
     }
     P4_DeleteSource(source);
 }
@@ -716,7 +508,7 @@ EnumParams _def_enum_params = {
 int InitArguments(EnumParams* params, int argc, const char** argv)
 {
     char debug_buf[64], *debug_str = debug_buf;
-    strcpy(debug_str, dbg_level_str(DBG_CRIT));
+    strcpy(debug_str, lbDbgLevelStr(DBG_CRIT));
 
     int use_debug = 0;
 
@@ -732,13 +524,14 @@ int InitArguments(EnumParams* params, int argc, const char** argv)
             OPT_BOOLEAN('R', "reuse", &params->reuse, "reuse an existing str function, don't emit one", NULL, 0, 0),
             OPT_BOOLEAN('K', "skip_includes", &params->skip_includes, "do not emit include source files", NULL, 0, 0),
             OPT_INTEGER('M', "max_enum", &params->max_enum_value, "ignore enum values above this max", NULL, 0, 0),
-            OPT_STRING('D', "debug_level", &debug_str, debug_levels, NULL, 0, 0),
+            OPT_STRING('D', "debug_level", &debug_str, lb_debug_levels, NULL, 0, 0),
             OPT_BOOLEAN('d', "debug", &use_debug, "show debug messages", NULL, 0, 0),
 
             OPT_END(),
     };
 
     struct argparse argparse;
+    
     argparse_init(&argparse, options, NULL, 0);
     argparse_describe(&argparse, "\nParse c/cpp files and generate a string array per enum.",
                       "\nExamples:\n"
@@ -746,15 +539,15 @@ int InitArguments(EnumParams* params, int argc, const char** argv)
                       "\t./enumstr --use_header enums.h source.c > enums.c\n");
     argc = argparse_parse(&argparse, argc, argv);
 
-    if (use_debug && _debug_level < DBG_INFO) {
-        _debug_level = DBG_INFO;
+    if (use_debug && lb_debug_level < DBG_INFO) {
+        lb_debug_level = DBG_INFO;
     }
-    _debug_level = dbg_level(debug_str);
+    lb_debug_level = lbDbgLevel(debug_str);
 
-    DEBUG_INFO("debug level: \"%s\" (%d)\n", dbg_level_str(_debug_level), _debug_level);
+    lb_DEBUG_INFO("debug level: \"%s\" (%d)\n", lbDbgLevelStr(lb_debug_level), lb_debug_level);
 
     if (argc < 1) {
-        Warn("At least one source file is expected.\n");
+        lbWarn("At least one source file is expected.\n");
         argparse_usage(&argparse);
         exit(1);
     }
@@ -764,13 +557,13 @@ int InitArguments(EnumParams* params, int argc, const char** argv)
 
 int main(int argc, const char** argv)
 {
-    SetProgName(argv[0]);
+    lbSetProgName(argv[0]);
     EnumParams params = _def_enum_params;
     FILE* out = stdout;
 
     argc = InitArguments(&params, argc, argv);
 
-    DEBUG_INFO("Start (argc %d)", argc);
+    lb_DEBUG_INFO("Start (argc %d)", argc);
 
     P4_Grammar* grammar = InitGrammar(&params, out);
 
@@ -790,6 +583,6 @@ int main(int argc, const char** argv)
     EmitEnd(params.header, out);
 
     P4_DeleteGrammar(grammar);
-    DEBUG_INFO("Done.");
+    lb_DEBUG_INFO("Done.");
     return 0;
 }

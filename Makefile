@@ -11,14 +11,15 @@ DOT_SCRIPT = ${GLOBAL}/scripts/gendot.py
 
 LIBDIR=${GLOBAL}/lib
 INCDIR=${GLOBAL}/include
+BASIC_LIB=libbasic
 PEG_LIB=peppa
 ARGS_LIB=argparse
 
-EXTRA_HEADERS=${INCDIR}/peppa.h ${INCDIR}/argparse.h
+EXTRA_HEADERS=${INCDIR}/libbasic.h ${INCDIR}/peppa.h ${INCDIR}/argparse.h
 HDRS=${EXTRA_HEADERS} enumpeg.h
 
 enumstr: enumstr.o
-	${CC} ${LDFLAGS} -L ${LIBDIR} -Wl,-R${LIBDIR} $< -o $@ -l ${PEG_LIB} -l ${ARGS_LIB}
+	${CC} ${LDFLAGS} -L ${LIBDIR} -Wl,-R${LIBDIR} $< -o $@ -l ${PEG_LIB} -l ${ARGS_LIB} -l${BASIC_LIB}
 
 
 enumstr.o: enumstr.c ${HDRS}
