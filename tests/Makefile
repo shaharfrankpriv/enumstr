@@ -19,4 +19,4 @@ sample.h: ${SRC} ${TOOL}
 	${TOOL} --header $@ --dump_enums $< > $@
 
 clean:
-	rm -f sample.c sample.h *.o sample
+	rm -f sample.c sample.h *.o sample sample.svg sample.asl

@@ -10,6 +10,16 @@
 #include <argparse.h>
 #include <peppa.h>
 
+
+#define xstr(s) str(s)
+#define str(s) #s
+
+#ifndef ARGPARSE_VERSION
+#define __ARGPARSE_VERSION "unknown"
+#else
+#define __ARGPARSE_VERSION xstr(ARGPARSE_VERSION)
+#endif
+
 #define ENUMSTRFILE "./enumstr.peg"
 
 /* The following is the enumstr.peg file translated into a c string file */
@@ -510,7 +520,7 @@ int InitArguments(EnumParams* params, int argc, const char** argv)
     char debug_buf[64], *debug_str = debug_buf;
     strcpy(debug_str, lbDbgLevelStr(DBG_CRIT));
 
-    int use_debug = 0;
+    int use_debug = 0, show_version = 0;
 
     struct argparse_option options[] = {
             OPT_HELP(),
@@ -526,12 +536,13 @@ int InitArguments(EnumParams* params, int argc, const char** argv)
             OPT_INTEGER('M', "max_enum", &params->max_enum_value, "ignore enum values above this max", NULL, 0, 0),
             OPT_STRING('D', "debug_level", &debug_str, lb_debug_levels, NULL, 0, 0),
             OPT_BOOLEAN('d', "debug", &use_debug, "show debug messages", NULL, 0, 0),
+            OPT_BOOLEAN('V', "version", &show_version, "show the version and exit", NULL, 0, 0),
 
             OPT_END(),
     };
 
     struct argparse argparse;
-    
+
     argparse_init(&argparse, options, NULL, 0);
     argparse_describe(&argparse, "\nParse c/cpp files and generate a string array per enum.",
                       "\nExamples:\n"
@@ -546,6 +557,10 @@ int InitArguments(EnumParams* params, int argc, const char** argv)
 
     lb_DEBUG_INFO("debug level: \"%s\" (%d)\n", lbDbgLevelStr(lb_debug_level), lb_debug_level);
 
+    if (show_version) {
+        printf("%s: version %s\n", lb_progname, __ARGPARSE_VERSION);
+        exit(1);
+    }
     if (argc < 1) {
         lbWarn("At least one source file is expected.\n");
         argparse_usage(&argparse);

@@ -1,6 +1,10 @@
 
 TARGET=enumstr
 GLOBAL=${HOME}/work
+INSTALL=install
+INSTALL_DIR=~/bin
+
+GIT_VERSION=${shell git log --format="%h" -n 1}
 
 PWD:=${shell pwd -P}
 TOOL=./enumstr.py
@@ -22,11 +26,15 @@ enumstr: enumstr.o
 	${CC} ${LDFLAGS} -L ${LIBDIR} -Wl,-R${LIBDIR} $< -o $@ -l ${PEG_LIB} -l ${ARGS_LIB} -l${BASIC_LIB}
 
 
-enumstr.o: enumstr.c ${HDRS}
-	${CC} ${CFLAGS} -I ${INCDIR} -c $< -o $@
+enumstr.o: enumstr.c ${HDRS} Makefile
+	${CC} ${CFLAGS} -I ${INCDIR} -DARGPARSE_VERSION=${GIT_VERSION} -c $< -o $@
 
 enumpeg.h: enumstr.peg
 	sed -e 's/\\/\\\\/g;s/"/\\"/g;s/	/\\t/g;s/^/"/;s/$$/\\n"/' $< > $@
+
+.PHONY: install
+install: enumstr
+	${INSTALL} $< ${INSTALL_DIR}
 
 .PHONY: test
 test: enumstr
@@ -34,7 +42,7 @@ test: enumstr
 
 # Peg utilitys
 .PHONY: graph
-graph: enumstr.svg
+graph: tests/sample.svg
 	eog $^
 
 %.svg: %.asl
@@ -42,10 +50,10 @@ graph: enumstr.svg
 	cat $< | python3 ${DOT_SCRIPT} | dot -Tsvg -o$@
 
 
-%.asl: %.c ${ENUM_GRAMMER}
+%.asl: %.txt ${ENUM_GRAMMER}
 	peppa parse -G ${ENUM_GRAMMER} -e SourceFile $< > $@
 
 # General
 clean:
-	rm -f sample.c sample.h sample enumstr.o enumstr *.o *.svg *.asl enumpeg.h
+	rm -f enumstr.o enumstr *.o *.svg *.asl enumpeg.h
 	cd tests && make clean
