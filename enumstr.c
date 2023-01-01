@@ -328,8 +328,6 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
 
     node = node->next;
     if (strcmp(node->rule_name, "SEMI")) {
-        // Panic("Enum def without ';' pos[%d:%d]", root->slice.start.lineno,
-        // root->slice.start.offset);
         PANIC_NODE(root, "Enum def without ';'");
     }
     if (!list) {
@@ -347,7 +345,7 @@ P4_Error ProcessEnumDef(P4_Node* root, FILE* file, ErrStr* errstr)
 }
 
 /**
- * @brief Processes all root enums under the root node
+ * @brief Main entry function - processes all root enums under the root node.
  *
  * @param root - root node
  * @param file - to emit to
@@ -448,7 +446,7 @@ void EmitStrFunction(FILE* file)
 /**
  * @brief Sets the User Data object field in the given node.
  * @details This is a callback function to be used by P4_InspectSourceAst() (see
- * main).
+ * ProcessFile()).
  */
 P4_Error SetUserData(P4_Node* node, void* userdata)
 {
@@ -456,7 +454,11 @@ P4_Error SetUserData(P4_Node* node, void* userdata)
     return P4_Ok;
 }
 
-P4_Grammar* InitGrammar(EnumParams* params, FILE* out)
+/**
+ * @brief Inits a grammar struct using the default linked grammar, or use the given grammar file override.
+ * @note The returned grammar struct must be deleted using P4_DeleteGrammar().
+ */
+P4_Grammar* InitGrammar(EnumParams* params)
 {
     ErrStr errstr;
     char* buf = enumpeg;
@@ -475,7 +477,11 @@ P4_Grammar* InitGrammar(EnumParams* params, FILE* out)
     return grammar;
 }
 
-void ParseFile(const char* srcfile, P4_Grammar* grammar, EnumParams* params, FILE* out)
+/**
+ * @brief Process the given source file using the given grammar and given params and emit
+ * matching enum strings / headers.
+ */
+void ProcessFile(const char* srcfile, P4_Grammar* grammar, EnumParams* params, FILE* out)
 {
     ErrStr errstr;
     P4_Error error = P4_Ok;
@@ -495,6 +501,9 @@ void ParseFile(const char* srcfile, P4_Grammar* grammar, EnumParams* params, FIL
     P4_DeleteSource(source);
 }
 
+/**
+ * @brief Emits include statements for each of the given sources.
+ */
 void EmitIncludes(const char** sources, int nsources, FILE* out)
 {
     for (int i = 0; i < nsources; i++) {
@@ -502,6 +511,7 @@ void EmitIncludes(const char** sources, int nsources, FILE* out)
     }
 }
 
+/** The default global parameters values. See InitArgumetns for the details. */
 EnumParams _def_enum_params = {
         .array_prefix = "_str_",
         .header = NULL,
@@ -515,6 +525,14 @@ EnumParams _def_enum_params = {
         .grammar = NULL,
 };
 
+/**
+ * @brief Parses and initializes the command line arguments to the given params struct.
+ * 
+ * @param params - to be used as default params and target params.
+ * @param argc 
+ * @param argv 
+ * @return int - then number of (non options) arguments (file names).
+ */
 int InitArguments(EnumParams* params, int argc, const char** argv)
 {
     char debug_buf[64], *debug_str = debug_buf;
@@ -580,7 +598,7 @@ int main(int argc, const char** argv)
 
     lb_DEBUG_INFO("Start (argc %d)", argc);
 
-    P4_Grammar* grammar = InitGrammar(&params, out);
+    P4_Grammar* grammar = InitGrammar(&params);
 
     EmitStart(&params, out);
 
@@ -593,7 +611,7 @@ int main(int argc, const char** argv)
     }
 
     for (int i = 0; i < argc; i++) {
-        ParseFile(argv[i], grammar, &params, out);
+        ProcessFile(argv[i], grammar, &params, out);
     }
     EmitEnd(params.header, out);
 
