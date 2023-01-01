@@ -27,7 +27,7 @@ enumstr: enumstr.o
 
 
 enumstr.o: enumstr.c ${HDRS} Makefile
-	${CC} ${CFLAGS} -I ${INCDIR} -DARGPARSE_VERSION=${GIT_VERSION} -c $< -o $@
+	${CC} ${CFLAGS} -I ${INCDIR} -DARGPARSE_VERSION="${GIT_VERSION} ${shell date +%F}" -c $< -o $@
 
 enumpeg.h: enumstr.peg
 	sed -e 's/\\/\\\\/g;s/"/\\"/g;s/	/\\t/g;s/^/"/;s/$$/\\n"/' $< > $@
